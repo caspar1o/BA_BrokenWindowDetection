@@ -72,7 +72,7 @@ const drawControl = new L.Control.Draw({
         circle: false,
         marker: false,
         circlemarker: false,
-        rectangle: true,  // Enable rectangle drawing
+        rectangle: true, 
     },
     edit: false
 });
