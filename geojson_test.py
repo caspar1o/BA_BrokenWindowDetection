@@ -7,10 +7,8 @@ from datetime import datetime
 import json
 from PIL import Image
 import io
-import csv
 from ultralytics import YOLO
 import logging
-import pandas as pd
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -22,7 +20,6 @@ STATIC_DIR = os.path.join(os.getcwd(), "static")
 os.makedirs(STATIC_DIR, exist_ok=True)
 
 DB_PATH = os.path.join(STATIC_DIR, "mapillary_data_geojson.db")
-CSV_PATH = os.path.join(STATIC_DIR, "mapillary_data_geojson.csv")
 GEOJSON_PATH = os.path.join(STATIC_DIR, "mapillary_data.geojson")
 
 # Initialize YOLO model
@@ -46,7 +43,6 @@ def init_db():
     conn.commit()
     conn.close()
 
-# create database
 init_db()
 
 def process_image_with_yolo(image_blob):
@@ -117,40 +113,15 @@ def store_location(image_data):
     conn.commit()
     conn.close()
 
-def export_to_csv():
-    conn = sqlite3.connect(DB_PATH)
+def db_to_geojson(db_path, geojson_path):
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
-    # Fetch all records from the jb_locations table
+    # Fetch all records from the table
     cursor.execute("SELECT * FROM mapillary_data_geojson")
     rows = cursor.fetchall()
 
-    # Get the column names
     column_names = [description[0] for description in cursor.description]
-
-    # Ensure json_classified is correctly exported
-    with open(CSV_PATH, 'w', newline='', encoding='utf-8') as csvfile:
-        csvwriter = csv.writer(csvfile)
-        csvwriter.writerow(column_names)  # Write header
-        for row in rows:
-            # Convert json_classified to string if it's a dictionary
-            row = list(row)
-            if isinstance(row[column_names.index("json_classified")], (dict, list)):
-                row[column_names.index("json_classified")] = json.dumps(row[column_names.index("json_classified")])
-            csvwriter.writerow(row)
-
-    conn.close()
-    print(f"CSV exported to {CSV_PATH}")
-
-def csv_to_geojson(csv_path, geojson_path=None):
-    geojson_path = GEOJSON_PATH or os.path.join(STATIC_DIR, "mapillary_data.geojson")
-
-    # Ensure the directory exists before saving the GeoJSON
-    directory = os.path.abspath(os.path.dirname(geojson_path))
-    os.makedirs(directory, exist_ok=True)
-
-    # Read the CSV file into a DataFrame
-    df = pd.read_csv(csv_path)
 
     # Create the GeoJSON structure
     geojson = {
@@ -158,13 +129,13 @@ def csv_to_geojson(csv_path, geojson_path=None):
         "features": []
     }
 
-    # Convert each row in the DataFrame to a GeoJSON feature
-    for _, row in df.iterrows():
-        # Parse the json_classified field to extract classification details
-        json_classified = json.loads(row["json_classified"]) if pd.notna(row["json_classified"]) else None
-        json_data = json.loads(row["json_data"]) if pd.notna(row["json_data"]) else None
+    for row in rows:
+        row_dict = dict(zip(column_names, row))
 
-        if json_classified and isinstance(json_classified["details"], str):
+        json_classified = json.loads(row_dict["json_classified"]) if row_dict["json_classified"] else None
+        json_data = json.loads(row_dict["json_data"]) if row_dict.get("json_data") else None
+
+        if json_classified and isinstance(json_classified.get("details"), str):
             try:
                 json_classified["details"] = json.loads(json_classified["details"])
             except json.JSONDecodeError:
@@ -174,22 +145,27 @@ def csv_to_geojson(csv_path, geojson_path=None):
             "type": "Feature",
             "geometry": {
                 "type": "Point",
-                "coordinates": [row["longitude"], row["latitude"]]
+                "coordinates": [row_dict["longitude"], row_dict["latitude"]]
             },
             "properties": {
-                "id": row["id"],
-                "captured_at": row["captured_at"],
-                "sequence_id": row["sequence_id"],
+                "id": row_dict["id"],
+                "captured_at": row_dict["captured_at"],
+                "sequence_id": row_dict["sequence_id"],
                 "json_classified": json_classified,
                 "thumb_1024_url": json_data.get("thumb_1024_url") if json_data else None
             }
         }
         geojson["features"].append(feature)
 
+    # Ensure the directory exists before saving the GeoJSON
+    directory = os.path.dirname(os.path.abspath(geojson_path))
+    os.makedirs(directory, exist_ok=True)
+
     # Write the GeoJSON to a file
-    with open(geojson_path, "w") as f:
+    with open(geojson_path, "w", encoding="utf-8") as f:
         json.dump(geojson, f, indent=2)
 
+    conn.close()
     print(f"GeoJSON saved to {geojson_path}")
 
 def analyze_classifications():
@@ -223,52 +199,6 @@ def analyze_classifications():
         f.write(f"Images with no windows or only undamaged windows: {undamaged_count}\n")
 
         conn.close()
-
-# Path to your MBTiles file 
-MBTILES_PATH = 'static/damage.mbtiles'
-@app.route('/tiles/<int:z>/<int:x>/<int:y>.png')
-def get_tile(z, x, y):
-    """
-    Returns a PNG tile from the MBTiles at zoom=z, column=x, row=y.
-    MBTiles typically store tiles in a 'tiles' table with 'zoom_level', 'tile_column', 'tile_row' fields.
-    """
-    try:
-        # Note: MBTiles often store tiles in "TMS" scheme, so y might need to be "flipped":
-        # But let's first see if the MBTiles uses standard scheme or TMS scheme.
-        # If your MBTiles is TMS-based, you need to transform y to its TMS counterpart:
-        #     y = (2**z - 1) - y
-        # This step depends on how your MBTiles was generated. 
-        # We'll show both approaches below. Uncomment if needed:
-
-        # y = (2 ** z - 1) - y  # Uncomment for TMS MBTiles
-
-        conn = sqlite3.connect(MBTILES_PATH)
-        cursor = conn.cursor()
-
-        # Query the tile data
-        # Many MBTiles have a table named 'tiles' with columns:
-        #   zoom_level, tile_column, tile_row, tile_data
-        cursor.execute('''
-            SELECT tile_data 
-            FROM tiles 
-            WHERE zoom_level=? AND tile_column=? AND tile_row=? 
-            LIMIT 1
-        ''', (z, x, y))
-
-        row = cursor.fetchone()
-        conn.close()
-
-        if row is None:
-            # No tile found
-            abort(404)
-        else:
-            tile_data = row[0]
-            # Return as image/png
-            return Response(tile_data, mimetype='image/png')
-
-    except Exception as e:
-        print("Error fetching tile:", e)
-        abort(500)
 
 @app.route("/get-image/<image_id>")
 def get_image(image_id):
@@ -358,11 +288,10 @@ def fetch_area():
         else:
             has_more = False
 
-    export_to_csv()
-    csv_to_geojson(CSV_PATH, "mapillary_data.geojson")
+    db_to_geojson(DB_PATH, GEOJSON_PATH)
 
     return jsonify({
-        "message": f"Successfully processed {total_images} images and exported to CSV",
+        "message": f"Successfully processed {total_images} images and exported to GEOJSON",
         "total_images": total_images
     })
 
@@ -460,11 +389,12 @@ def process_images():
     conn.commit()
     conn.close()
 
-    export_to_csv()
+    db_to_geojson(DB_PATH, GEOJSON_PATH)
+    
     results = analyze_classifications()
 
     return jsonify({
-        "message": "Image processing completed and exported to CSV",
+        "message": "Image processing completed and exported to GEOJSON",
         "classification_summary": results
     })
 
@@ -488,16 +418,12 @@ def get_image_classified(image_id):
 
 @app.route("/clear-data", methods=["POST"])
 def clear_data():
-    # Clear the database
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("DELETE FROM mapillary_data_geojson")
     conn.commit()
     conn.close()
 
-    # Delete the CSV and GeoJSON files if they exist
-    if os.path.exists(CSV_PATH):
-        os.remove(CSV_PATH)
     if os.path.exists(GEOJSON_PATH):
         os.remove(GEOJSON_PATH)
 
