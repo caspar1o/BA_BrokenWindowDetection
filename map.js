@@ -2,7 +2,7 @@ const map = L.map("map").setView([23.1136, -82.3666], 13);
 
 L.tileLayer("https://api.mapbox.com/styles/v1/mapbox/light-v11/tiles/{z}/{x}/{y}?access_token={accessToken}", {
     id: "mapbox/streets-v11", 
-    accessToken: "pk.eyJ1IjoiY2FzY3V0ZSIsImEiOiJjbTY2N2pvemExZXJuMmlzZWR3YjY1NHFnIn0.pyrfT0eTSoUhe7Bnbdh7kA",
+    accessToken: "mapbox_access_token",
     tileSize: 512, 
     zoomOffset: -1, 
     attribution: '© <a href="https://www.mapbox.com/">Mapbox</a> contributors'

@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 app = Flask(__name__)
 
-MAPILLARY_ACCESS_TOKEN = "MLY|8910876029008890|ee77fbe8f16e34a5d85503159d9eeb91"
+MAPILLARY_ACCESS_TOKEN = "mapillary_access_token"
 
 STATIC_DIR = os.path.join(os.getcwd(), "static")
 os.makedirs(STATIC_DIR, exist_ok=True)
