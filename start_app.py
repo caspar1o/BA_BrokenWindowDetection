@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file, render_template, abort, Response
+from flask import Flask, request, jsonify, send_file, render_template
 import requests
 import os
 import zipfile
@@ -22,6 +22,7 @@ os.makedirs(STATIC_DIR, exist_ok=True)
 DB_PATH = os.path.join(STATIC_DIR, "mapillary_data_geojson.db")
 GEOJSON_PATH = os.path.join(STATIC_DIR, "mapillary_data.geojson")
 
+# Initialize YOLO model
 YOLO_MODEL_PATH = "./train17_100epochs/weights/best.pt"
 model = YOLO(YOLO_MODEL_PATH)
 
@@ -48,6 +49,7 @@ def process_image_with_yolo(image_blob):
     image = Image.open(io.BytesIO(image_blob))
     results = model.predict(source=image, save=False, conf=0.25)
 
+    # Convert processed image back to bytes
     processed_image = results[0].plot()
     image_bytes = io.BytesIO()
     Image.fromarray(processed_image).save(image_bytes, format='JPEG')
@@ -79,6 +81,7 @@ def store_location(image_data):
     else:
         image_1024 = None
 
+    # Process the image with YOLO model
     if image_1024:
         image_classified, json_classified = process_image_with_yolo(image_1024)
     else:
@@ -114,11 +117,13 @@ def db_to_geojson(db_path, geojson_path):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
+    # Fetch all records from the table
     cursor.execute("SELECT * FROM mapillary_data_geojson")
     rows = cursor.fetchall()
 
     column_names = [description[0] for description in cursor.description]
 
+    # Create the GeoJSON structure
     geojson = {
         "type": "FeatureCollection",
         "features": []
@@ -152,9 +157,11 @@ def db_to_geojson(db_path, geojson_path):
         }
         geojson["features"].append(feature)
 
+    # Ensure the directory exists before saving the GeoJSON
     directory = os.path.dirname(os.path.abspath(geojson_path))
     os.makedirs(directory, exist_ok=True)
 
+    # Write the GeoJSON to a file
     with open(geojson_path, "w", encoding="utf-8") as f:
         json.dump(geojson, f, indent=2)
 
@@ -396,6 +403,7 @@ def get_image_classified(image_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
+    # Retrieve the classified image from the database
     c.execute("SELECT image_classified FROM mapillary_data_geojson WHERE id = ?", (image_id,))
     result = c.fetchone()
     conn.close()
